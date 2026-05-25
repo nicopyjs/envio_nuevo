@@ -1,0 +1,37 @@
+name: ETL Defontana - Histórico Semanal
+
+on:
+  schedule:
+    # Domingos a las 07:00 UTC (03:00 o 04:00 AM hora Chile)
+    - cron: "0 10 * * 0"
+  workflow_dispatch:          # Permite ejecutar manualmente desde GitHub
+
+jobs:
+  etl-historico:
+    name: Extraer histórico completo y subir a SharePoint
+    runs-on: ubuntu-latest
+    timeout-minutes: 120      # El histórico puede tardar bastante
+
+    env:
+      DEFONTANA_TOKEN:    ${{ secrets.DEFONTANA_TOKEN }}
+      AZURE_TENANT_ID:    ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_ID:    ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      ONEDRIVE_USER:      ${{ secrets.ONEDRIVE_USER }}
+      ONEDRIVE_FOLDER:    ${{ secrets.ONEDRIVE_FOLDER }}
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: "Histórico: encabezados 2020 → año actual"
+        run: python vouchers_historical.py

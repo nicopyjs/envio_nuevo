@@ -1,0 +1,40 @@
+name: ETL Defontana - Diario
+
+on:
+  schedule:
+    # 06:00 UTC = 02:00 o 03:00 AM hora Chile (según horario de verano)
+    - cron: "0 9 * * 1-5"   # Lunes a viernes. Cambia a "0 9 * * *" si quieres incluir fines de semana.
+  workflow_dispatch:          # Permite ejecutar manualmente desde GitHub
+
+jobs:
+  etl:
+    name: Extraer y subir a SharePoint
+    runs-on: ubuntu-latest
+    timeout-minutes: 60       # Si tarda más de 1 hora algo falló
+
+    env:
+      DEFONTANA_TOKEN:    ${{ secrets.DEFONTANA_TOKEN }}
+      AZURE_TENANT_ID:    ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_ID:    ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      ONEDRIVE_USER:      ${{ secrets.ONEDRIVE_USER }}
+      ONEDRIVE_FOLDER:    ${{ secrets.ONEDRIVE_FOLDER }}
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: "Script 1/2: Encabezados últimos 3 meses"
+        run: python vouchers_3m.py
+
+      - name: "Script 2/2: Detalle últimos 3 meses"
+        run: python vouchers_detail_3m.py
