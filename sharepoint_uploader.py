@@ -1,83 +1,88 @@
 """
-sharepoint_uploader.py
-Módulo compartido para autenticar con Azure AD y subir archivos CSV al
-OneDrive for Business de un usuario, usando Microsoft Graph API con
-credenciales de aplicación (client credentials flow).
+google_sheets_uploader.py  (renombrado internamente, el archivo se llama sharepoint_uploader.py
+para no cambiar los imports en los otros scripts)
+
+Módulo compartido para autenticar con una cuenta de servicio de Google y
+escribir DataFrames directamente en pestañas de un Google Spreadsheet.
+Equivalente a TRUNCATE + INSERT: borra la pestaña y la reescribe completa.
 
 Variables de entorno requeridas:
-    AZURE_TENANT_ID     - ID del directorio (inquilino) de Azure AD
-    AZURE_CLIENT_ID     - ID de la aplicación registrada (defontana-etl)
-    AZURE_CLIENT_SECRET - Secreto de cliente generado en Azure AD
-    ONEDRIVE_USER       - Email del usuario dueño del OneDrive destino
-                          (ej: npalma@nebchile.cl)
-    ONEDRIVE_FOLDER     - Carpeta base en OneDrive (ej: Defontana ETL)
+    GOOGLE_SERVICE_ACCOUNT_JSON  - Contenido completo del JSON de la service account
+    GOOGLE_SPREADSHEET_ID        - ID del spreadsheet destino (de la URL de Google Sheets)
 """
 
 import os
-import msal
-import requests
+import json
+import math
+import gspread
+from google.oauth2.service_account import Credentials
 
-# ── Configuración desde variables de entorno ──────────────────────────────────
-TENANT_ID     = os.environ["AZURE_TENANT_ID"]
-CLIENT_ID     = os.environ["AZURE_CLIENT_ID"]
-CLIENT_SECRET = os.environ["AZURE_CLIENT_SECRET"]
-OD_USER       = os.environ["ONEDRIVE_USER"]           # npalma@nebchile.cl
-OD_FOLDER     = os.environ.get("ONEDRIVE_FOLDER", "Defontana ETL")
-
-GRAPH_SCOPE   = ["https://graph.microsoft.com/.default"]
-GRAPH_BASE    = "https://graph.microsoft.com/v1.0"
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive",
+]
 
 
-def _get_token() -> str:
-    """Obtiene un access token de Azure AD usando client credentials."""
-    app = msal.ConfidentialClientApplication(
-        CLIENT_ID,
-        authority=f"https://login.microsoftonline.com/{TENANT_ID}",
-        client_credential=CLIENT_SECRET,
-    )
-    result = app.acquire_token_for_client(scopes=GRAPH_SCOPE)
-    if "access_token" not in result:
-        raise RuntimeError(
-            f"Error al obtener token de Azure AD: {result.get('error_description', result)}"
-        )
-    return result["access_token"]
+def _get_client() -> gspread.Client:
+    """Autentica con la service account y devuelve un cliente de gspread."""
+    raw = os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"]
+    info = json.loads(raw)
+    creds = Credentials.from_service_account_info(info, scopes=SCOPES)
+    return gspread.authorize(creds)
 
 
 def upload_dataframe(df, subfolder: str, filename: str, logger=None) -> None:
     """
-    Sube un DataFrame como CSV al OneDrive for Business del usuario configurado.
+    Escribe un DataFrame en una pestaña de Google Sheets.
+    La pestaña se identifica por 'filename' (sin extensión).
+    Si no existe se crea; si existe se limpia y se reescribe.
 
     Args:
-        df        : DataFrame de pandas a exportar.
-        subfolder : Subcarpeta dentro de OD_FOLDER (ej: 'TresMeses', 'Historico').
-        filename  : Nombre del archivo CSV (ej: 'three_months_vouchers.csv').
-        logger    : Logger opcional para registrar el resultado.
+        df        : DataFrame de pandas a escribir.
+        subfolder : No se usa en Google Sheets (se conserva la firma para
+                    compatibilidad con los scripts de extracción).
+        filename  : Nombre del archivo (ej: 'three_months_vouchers.csv').
+                    Se usa como nombre de la pestaña (sin .csv).
+        logger    : Logger opcional.
     """
-    token = _get_token()
+    spreadsheet_id = os.environ["GOOGLE_SPREADSHEET_ID"]
+    sheet_name = filename.replace(".csv", "")   # nombre de la pestaña
 
-    csv_bytes = df.to_csv(index=False).encode("utf-8")
-    remote_path = f"{OD_FOLDER}/{subfolder}/{filename}"
+    client      = _get_client()
+    spreadsheet = client.open_by_key(spreadsheet_id)
 
-    # Endpoint: OneDrive for Business del usuario vía Graph API (app permissions)
-    url = f"{GRAPH_BASE}/users/{OD_USER}/drive/root:/{remote_path}:/content"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type":  "text/plain",
-    }
-
-    response = requests.put(url, headers=headers, data=csv_bytes, timeout=60)
-
-    if response.status_code in (200, 201):
-        msg = f"[OK] Subido a OneDrive ({OD_USER}): {remote_path} ({len(df)} filas)"
-        print(msg)
+    # Obtener o crear la pestaña
+    try:
+        worksheet = spreadsheet.worksheet(sheet_name)
+        worksheet.clear()
         if logger:
-            logger.info(msg)
-    else:
-        error_msg = (
-            f"[ERROR] No se pudo subir {remote_path}. "
-            f"HTTP {response.status_code}: {response.text[:300]}"
+            logger.info(f"Pestaña '{sheet_name}' limpiada.")
+    except gspread.exceptions.WorksheetNotFound:
+        worksheet = spreadsheet.add_worksheet(
+            title=sheet_name, rows=max(len(df) + 10, 100), cols=len(df.columns) + 2
         )
-        print(error_msg)
         if logger:
-            logger.error(error_msg)
-        response.raise_for_status()
+            logger.info(f"Pestaña '{sheet_name}' creada.")
+
+    # Convertir DataFrame a lista de listas (header + filas)
+    # Reemplazar NaN/NaT/None con cadena vacía para Google Sheets
+    df_clean = df.fillna("").astype(str)
+    values   = [df_clean.columns.tolist()] + df_clean.values.tolist()
+
+    # Google Sheets limita a ~10M celdas por hoja; subir en lotes de 50k filas
+    BATCH = 50_000
+    total_batches = math.ceil(len(values) / BATCH)
+
+    for i in range(total_batches):
+        chunk = values[i * BATCH : (i + 1) * BATCH]
+        start_row = i * BATCH + 1
+        worksheet.update(
+            range_name=f"A{start_row}",
+            values=chunk,
+            value_input_option="RAW",
+        )
+
+    msg = f"[OK] Google Sheets '{sheet_name}': {len(df)} filas escritas."
+    print(msg)
+    if logger:
+        logger.info(msg)

@@ -13,12 +13,9 @@ jobs:
     timeout-minutes: 60       # Si tarda más de 1 hora algo falló
 
     env:
-      DEFONTANA_TOKEN:    ${{ secrets.DEFONTANA_TOKEN }}
-      AZURE_TENANT_ID:    ${{ secrets.AZURE_TENANT_ID }}
-      AZURE_CLIENT_ID:    ${{ secrets.AZURE_CLIENT_ID }}
-      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-      ONEDRIVE_USER:      ${{ secrets.ONEDRIVE_USER }}
-      ONEDRIVE_FOLDER:    ${{ secrets.ONEDRIVE_FOLDER }}
+      DEFONTANA_TOKEN:             ${{ secrets.DEFONTANA_TOKEN }}
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      GOOGLE_SPREADSHEET_ID:       ${{ secrets.GOOGLE_SPREADSHEET_ID }}
 
     steps:
       - name: Checkout código
