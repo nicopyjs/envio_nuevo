@@ -104,6 +104,12 @@ def main():
         # ── Diagnóstico: mostrar claves raíz de la respuesta una vez ──
         if not logged_keys:
             logger.info(f"[ESTRUCTURA GetVoucher] claves raíz: {list(detail_response.keys())}")
+            hdr_obj = detail_response.get("header")
+            if isinstance(hdr_obj, dict):
+                logger.info(f"[ESTRUCTURA GetVoucher] claves de 'header': {list(hdr_obj.keys())}")
+                logger.info(f"[ESTRUCTURA GetVoucher] bussinessCenterId en header: {hdr_obj.get('bussinessCenterId')!r}")
+            else:
+                logger.info(f"[ESTRUCTURA GetVoucher] 'header' no es dict, es: {type(hdr_obj).__name__} = {str(hdr_obj)[:200]}")
             logged_keys = True
 
         # ── bussinessCenterId del encabezado del comprobante ──────────
