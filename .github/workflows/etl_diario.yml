@@ -30,8 +30,11 @@ jobs:
       - name: Instalar dependencias
         run: pip install -r requirements.txt
 
-      - name: "Script 1/2: Encabezados últimos 3 meses"
+      - name: "Script 1/3: Encabezados últimos 3 meses"
         run: python vouchers_3m.py
 
-      - name: "Script 2/2: Detalle últimos 3 meses"
+      - name: "Script 2/3: Detalle últimos 3 meses"
         run: python vouchers_detail_3m.py
+
+      - name: "Script 3/3: Detalle año completo (hist_details_YYYY)"
+        run: python vouchers_detail_year.py
