@@ -88,8 +88,10 @@ def main():
     logger.info(f"Total comprobantes a detallar: {len(all_vouchers)}")
 
     # 2. Obtener detalle de cada comprobante
-    detailed_rows = []
-    timestamp     = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    detailed_rows  = []
+    timestamp      = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    logged_keys    = False          # para imprimir estructura de respuesta una sola vez
+    filled_from_hdr = 0             # contador: líneas que heredaron área del encabezado
 
     for voucher in all_vouchers:
         detail_response = get_voucher_detail(TOKEN, voucher)
@@ -98,7 +100,28 @@ def main():
         details = detail_response.get("detail")
         if not details:
             continue
+
+        # ── Diagnóstico: mostrar claves raíz de la respuesta una vez ──
+        if not logged_keys:
+            logger.info(f"[ESTRUCTURA GetVoucher] claves raíz: {list(detail_response.keys())}")
+            logged_keys = True
+
+        # ── bussinessCenterId del encabezado del comprobante ──────────
+        # La API puede devolverlo a nivel raíz del objeto o en un sub-objeto "header".
+        # Se usa como fallback para líneas que tengan el campo vacío/nulo.
+        header_biz = (
+            detail_response.get("bussinessCenterId")
+            or (detail_response.get("header") or {}).get("bussinessCenterId")
+            or voucher.get("bussinessCenterId")   # rara vez en GetVoucherList, pero por si acaso
+            or ""
+        )
+
         for line in details:
+            line_biz = line.get("bussinessCenterId") or ""
+            if not line_biz and header_biz:
+                line_biz = header_biz
+                filled_from_hdr += 1
+
             detailed_rows.append({
                 "detailLine":             line.get("detailLine"),
                 "accountCode":            line.get("accountCode"),
@@ -114,7 +137,7 @@ def main():
                 "documentNumber":         line.get("documentNumber"),
                 "documentExpirationDate": line.get("documentExpirationDate"),
                 "originDocumentData":     line.get("originDocumentData"),
-                "bussinessCenterId":      line.get("bussinessCenterId"),
+                "bussinessCenterId":      line_biz,
                 "classifier1Id":          line.get("classifier1Id"),
                 "classifier2Id":          line.get("classifier2Id"),
                 "movementTypeId":         line.get("movementTypeId"),
@@ -127,6 +150,8 @@ def main():
                 "date":                   voucher.get("date"),
                 "controlDate":            timestamp,
             })
+
+    logger.info(f"Líneas con área heredada del encabezado: {filled_from_hdr}")
 
     if not detailed_rows:
         logger.warning("No se obtuvieron detalles. No se sube archivo.")

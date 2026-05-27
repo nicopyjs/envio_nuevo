@@ -95,6 +95,9 @@ def main():
     detailed_rows = []
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+    logged_keys     = False
+    filled_from_hdr = 0
+
     for voucher in all_vouchers:
         detail_response = get_voucher_detail(TOKEN, voucher)
         if not detail_response:
@@ -102,8 +105,27 @@ def main():
         details = detail_response.get("detail")
         if not details:
             continue
+
+        # Diagnóstico: estructura de respuesta (una vez)
+        if not logged_keys:
+            logger.info(f"[ESTRUCTURA GetVoucher] claves raíz: {list(detail_response.keys())}")
+            logged_keys = True
+
+        # bussinessCenterId del encabezado → fallback para líneas vacías
+        header_biz = (
+            detail_response.get("bussinessCenterId")
+            or (detail_response.get("header") or {}).get("bussinessCenterId")
+            or voucher.get("bussinessCenterId")
+            or ""
+        )
+
         for line in details:
-            row = {
+            line_biz = line.get("bussinessCenterId") or ""
+            if not line_biz and header_biz:
+                line_biz = header_biz
+                filled_from_hdr += 1
+
+            detailed_rows.append({
                 "detailLine":             line.get("detailLine"),
                 "accountCode":            line.get("accountCode"),
                 "debit":                  line.get("debit", 0),
@@ -118,7 +140,7 @@ def main():
                 "documentNumber":         line.get("documentNumber"),
                 "documentExpirationDate": line.get("documentExpirationDate"),
                 "originDocumentData":     line.get("originDocumentData"),
-                "bussinessCenterId":      line.get("bussinessCenterId"),
+                "bussinessCenterId":      line_biz,
                 "classifier1Id":          line.get("classifier1Id"),
                 "classifier2Id":          line.get("classifier2Id"),
                 "movementTypeId":         line.get("movementTypeId"),
@@ -130,8 +152,9 @@ def main():
                 "entryDate":              voucher.get("entryDate"),
                 "date":                   voucher.get("date"),
                 "controlDate":            timestamp,
-            }
-            detailed_rows.append(row)
+            })
+
+    logger.info(f"Líneas con área heredada del encabezado: {filled_from_hdr}")
 
     if not detailed_rows:
         logger.warning("No se obtuvieron detalles. No se sube archivo.")
