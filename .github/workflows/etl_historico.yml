@@ -10,7 +10,7 @@ jobs:
   etl-historico:
     name: Extraer histórico completo y subir a SharePoint
     runs-on: ubuntu-latest
-    timeout-minutes: 120      # El histórico puede tardar bastante
+    timeout-minutes: 300      # El histórico puede tardar bastante
 
     env:
       DEFONTANA_TOKEN:             ${{ secrets.DEFONTANA_TOKEN }}
