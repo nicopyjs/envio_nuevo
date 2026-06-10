@@ -2,8 +2,8 @@ name: ETL Defontana - Diario
 
 on:
   schedule:
-    # 06:00 UTC = 02:00 o 03:00 AM hora Chile (según horario de verano)
-    - cron: "0 9 * * 1-5"   # Lunes a viernes. Cambia a "0 9 * * *" si quieres incluir fines de semana.
+    # 10:00 UTC = 06:00 AM hora Chile invierno (CLT, UTC-4) | 07:00 AM en verano (CLST, UTC-3)
+    - cron: "0 10 * * 1-5"  # Lunes a viernes. Cambia a "0 10 * * *" si quieres incluir fines de semana.
   workflow_dispatch:          # Permite ejecutar manualmente desde GitHub
 
 jobs:

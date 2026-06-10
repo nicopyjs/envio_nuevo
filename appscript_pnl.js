@@ -1,5 +1,5 @@
 // ============================================================
-// ANÁLISIS FINANCIERO POR ÁREA — Apps Script para Google Sheets
+// ANÁLISIS FINANCIERO POR ÁREA Y CENTRO DE NEGOCIO
 // New Energy Business SpA — Defontana ETL
 //
 // INSTALACIÓN:
@@ -9,34 +9,77 @@
 //   4. Guarda (Ctrl+S) → Ejecutar → generarTodo
 //   5. La primera vez pedirá permisos → Aceptar
 //
-// Genera dos hojas nuevas:
-//   • pnl_data        → fuente para Looker Studio (larga/tidy)
-//   • pnl_resumen     → tabla pivote legible por humanos
+// Genera tres hojas:
+//   • pnl_data      → P&L por área y mes (fuente Looker Studio)
+//   • pnl_cn_data   → P&L por centro de negocio específico y mes
+//   • pnl_resumen   → tabla pivote legible por área
 //
-// v3: JOIN intra-hoja para propagar bussinessCenterId.
-//     Para cada comprobante (voucherType|number|fiscalYear), si ALGUNA
-//     línea tiene bussinessCenterId, se usa para TODAS las líneas del mismo
-//     comprobante. Replica exactamente la lógica del v_combined_voucher_details.
+// v4: JOIN con centros_negocios para nombres de CN.
+//     Cruza bussinessCenterId con el spreadsheet maestro de centros de negocio
+//     para agregar nombre, CN agrupado y área de cada centro.
 // ============================================================
 
 const AREAS_VALIDAS = ['RCT', 'SST', 'INT', 'GNN'];
 const AREA_NOMBRES  = { RCT: 'Refacciones', SST: 'Serv. Técnico', INT: 'Instalaciones', GNN: 'General' };
 
+// ID del spreadsheet maestro de centros de negocio
+const CN_SPREADSHEET_ID = '1XCeMZRw6bU--3SeOFRI08J5eFxaFbvVflPWWaczufQc';
+
+// ── LOOKUP: centros de negocio ────────────────────────────────
+// Devuelve mapa: code.toUpperCase() → { descripcion, cnAgrupado, cnAgrupado2 }
+function _buildCNLookup() {
+  const cnLookup = {};
+  try {
+    const cnSS    = SpreadsheetApp.openById(CN_SPREADSHEET_ID);
+    const sheet   = cnSS.getSheets()[0];
+    const data    = sheet.getDataRange().getValues();
+    const header  = data[0].map(h => String(h).trim().toLowerCase());
+
+    const iCode  = header.indexOf('code');
+    const iDesc  = header.indexOf('description');
+    const iCN1   = header.findIndex(h => h.includes('cn agrupado') && !h.includes('2'));
+    const iCN2   = header.findIndex(h => h.includes('cn agrupado 2'));
+
+    if (iCode === -1 || iDesc === -1) {
+      Logger.log('[CN LOOKUP] No se encontraron columnas Code/Description en centros_negocios');
+      return cnLookup;
+    }
+
+    let loaded = 0;
+    for (let r = 1; r < data.length; r++) {
+      const code = String(data[r][iCode] || '').trim().toUpperCase();
+      if (!code) continue;
+      cnLookup[code] = {
+        descripcion:  String(data[r][iDesc] || '').trim(),
+        cnAgrupado:   iCN1 !== -1 ? String(data[r][iCN1] || '').trim() : '',
+        cnAgrupado2:  iCN2 !== -1 ? String(data[r][iCN2] || '').trim() : '',
+      };
+      loaded++;
+    }
+    Logger.log(`[CN LOOKUP] ${loaded} centros de negocio cargados`);
+  } catch (e) {
+    Logger.log(`[CN LOOKUP] Error abriendo centros_negocios: ${e.message}`);
+  }
+  return cnLookup;
+}
+
 // ── MENÚ ─────────────────────────────────────────────────────
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('📊 Análisis Defontana')
-    .addItem('▶ Generar todo (P&L + Resumen)', 'generarTodo')
+    .addItem('▶ Generar todo', 'generarTodo')
     .addSeparator()
-    .addItem('Solo P&L data (fuente Looker)', 'generarPNL')
-    .addItem('Solo tabla resumen', 'generarResumen')
+    .addItem('P&L por área (pnl_data)', 'generarPNL')
+    .addItem('P&L por centro de negocio (pnl_cn_data)', 'generarPNLCN')
+    .addItem('Tabla resumen por área (pnl_resumen)', 'generarResumen')
     .addToUi();
 }
 
 function generarTodo() {
   generarPNL();
+  generarPNLCN();
   generarResumen();
-  SpreadsheetApp.getUi().alert('✅ Listo.\n\n• pnl_data → conéctala a Looker Studio\n• pnl_resumen → vista rápida por área y mes');
+  SpreadsheetApp.getUi().alert('✅ Listo.\n\n• pnl_data → P&L por área\n• pnl_cn_data → P&L por centro de negocio\n• pnl_resumen → tabla pivote');
 }
 
 // ── LOOKUP DE FECHAS desde historical_vouchers ───────────────
@@ -249,14 +292,53 @@ function generarPNL() {
   hdr.setFontWeight('bold').setBackground('#1e3a5f').setFontColor('white');
   pnlSheet.setFrozenRows(1);
 
-  const nRows = sorted.length;
+  const nRows   = sorted.length;
+  const nCols   = sorted[0].length;
+
+  // ── Colores por área ─────────────────────────────────────────
+  // Fondo suave y texto oscuro para cada área, legible con formato de número.
+  const AREA_COLORS = {
+    RCT: { bg: '#dbeafe', font: '#1e3a8a' },  // azul — Refacciones
+    SST: { bg: '#dcfce7', font: '#14532d' },  // verde — Serv. Técnico
+    INT: { bg: '#fef9c3', font: '#713f12' },  // amarillo — Instalaciones
+    GNN: { bg: '#f3f4f6', font: '#374151' },  // gris — General
+  };
+
+  // Agrupar filas consecutivas por área para hacer setBackground en bloque
+  let currentArea = null;
+  let blockStart  = 2;   // fila 1 es el encabezado; filas de datos desde 2
+
+  const flushBlock = (endRow, area) => {
+    if (!area || endRow < blockStart) return;
+    const colors = AREA_COLORS[area];
+    if (!colors) return;
+    const range = pnlSheet.getRange(blockStart, 1, endRow - blockStart + 1, nCols);
+    range.setBackground(colors.bg).setFontColor(colors.font);
+  };
+
+  for (let i = 1; i < sorted.length; i++) {
+    const area = sorted[i][0];  // columna A = área
+    const sheetRow = i + 1;     // fila en la hoja (encabezado ocupa fila 1)
+
+    if (area !== currentArea) {
+      flushBlock(sheetRow - 1, currentArea);
+      currentArea = area;
+      blockStart  = sheetRow;
+    }
+  }
+  flushBlock(sorted.length, currentArea);  // último bloque
+
+  // Negrita en columna de área y nombre
+  pnlSheet.getRange(2, 1, nRows - 1, 2).setFontWeight('bold');
+
+  // Formato numérico
   pnlSheet.getRange(2, 6, nRows - 1, 3).setNumberFormat('#,##0');
   pnlSheet.getRange(2, 9, nRows - 1, 1).setNumberFormat('0.00"%"');
 
+  // Resultado negativo en rojo (sobre el color de área)
   const resCol = pnlSheet.getRange(2, 8, nRows - 1, 1);
   const rule = SpreadsheetApp.newConditionalFormatRule()
     .whenNumberLessThan(0)
-    .setBackground('#fef2f2')
     .setFontColor('#dc2626')
     .setRanges([resCol])
     .build();
@@ -265,7 +347,194 @@ function generarPNL() {
   Logger.log(`pnl_data: ${sorted.length - 1} filas generadas`);
 }
 
-// ── PASO 2: GENERAR pnl_resumen ──────────────────────────────
+// ── PASO 2: GENERAR pnl_cn_data (por centro de negocio) ──────
+// Mismo procesamiento que generarPNL pero agrupa por bussinessCenterId completo
+// y enriquece con nombre y agrupación desde centros_negocios.gsheet
+function generarPNLCN() {
+  const ss   = SpreadsheetApp.getActiveSpreadsheet();
+  const tabs  = ss.getSheets()
+                  .map(s => s.getName())
+                  .filter(n => n.startsWith('hist_details_'))
+                  .sort();
+
+  if (tabs.length === 0) {
+    SpreadsheetApp.getUi().alert('No se encontraron hojas hist_details_*.');
+    return;
+  }
+
+  // Cargar lookup de centros de negocio y de fechas
+  Logger.log('Cargando centros de negocio...');
+  const cnLookup   = _buildCNLookup();
+  const dateLookup = _buildDateLookup(ss);
+
+  // Acumulador: { "SSTLTOCON000000|2026|5": { ingresos, gastos } }
+  const acum = {};
+
+  for (const tabName of tabs) {
+    const sheet = ss.getSheetByName(tabName);
+    if (!sheet || sheet.getLastRow() < 2) continue;
+
+    const data   = sheet.getDataRange().getValues();
+    const header = data[0].map(h => String(h).trim());
+
+    const idx = {
+      accountCode:   _col(header, ['accountCode', 'accountcode']),
+      debit:         _col(header, ['debit', 'debe']),
+      credit:        _col(header, ['credit', 'haber']),
+      bussinesCenter:_col(header, ['bussinessCenterId', 'businessCenterId', 'bussinesscenterId']),
+      date:          _col(header, ['date', 'entryDate', 'entrydate', 'fecha', 'entry_date']),
+      voucherType:   _col(header, ['voucherType', 'vouchertype']),
+      voucherNumber: _col(header, ['voucherNumber', 'vouchernumber', 'number']),
+      fiscalYear:    _col(header, ['fiscalYear', 'fiscalyear']),
+    };
+
+    const canJoin       = idx.voucherType !== -1 && idx.voucherNumber !== -1 && idx.fiscalYear !== -1;
+    const hasDateLookup = canJoin && Object.keys(dateLookup).length > 0;
+
+    if (['accountCode','debit','credit'].some(k => idx[k] === -1)) continue;
+    if (idx.date === -1 && !hasDateLookup) continue;
+
+    // Fase 1: lookup intra-hoja para propagar bussinessCenterId
+    const intraLookup = {};
+    if (canJoin && idx.bussinesCenter !== -1) {
+      for (let r = 1; r < data.length; r++) {
+        const biz = String(data[r][idx.bussinesCenter] || '').trim();
+        if (!biz) continue;
+        const key = `${data[r][idx.voucherType]}|${data[r][idx.voucherNumber]}|${data[r][idx.fiscalYear]}`;
+        if (!intraLookup[key]) intraLookup[key] = biz;
+      }
+    }
+
+    // Fase 2: acumular por CN
+    for (let r = 1; r < data.length; r++) {
+      const row         = data[r];
+      const accountCode = String(row[idx.accountCode] || '').trim();
+      const debit       = _num(row[idx.debit]);
+      const credit      = _num(row[idx.credit]);
+
+      let dateRaw = idx.date !== -1 ? row[idx.date] : null;
+      if (!dateRaw && canJoin) {
+        const dk = `${row[idx.voucherType]}|${row[idx.voucherNumber]}|${row[idx.fiscalYear]}`;
+        dateRaw  = dateLookup[dk] || null;
+      }
+
+      let bizCenter = idx.bussinesCenter !== -1
+        ? String(row[idx.bussinesCenter] || '').trim().toUpperCase()
+        : '';
+      if (!bizCenter && canJoin) {
+        const lk = `${row[idx.voucherType]}|${row[idx.voucherNumber]}|${row[idx.fiscalYear]}`;
+        if (intraLookup[lk]) bizCenter = intraLookup[lk].toUpperCase();
+      }
+
+      if (!bizCenter) continue;
+
+      // Solo cuentas 3 y 4
+      const firstDigit = accountCode.replace(/\D/, '').charAt(0);
+      if (firstDigit !== '3' && firstDigit !== '4') continue;
+
+      const parsed = _parseDate(dateRaw);
+      if (!parsed) continue;
+      const { year, month } = parsed;
+
+      const key = `${bizCenter}|${year}|${month}`;
+      if (!acum[key]) acum[key] = { ingresos: 0, gastos: 0 };
+
+      if (firstDigit === '3') {
+        acum[key].ingresos += (credit - debit);
+      } else {
+        acum[key].gastos   += (debit - credit);
+      }
+    }
+    Logger.log(`${tabName}: procesado para pnl_cn_data`);
+  }
+
+  // Construir filas de salida con JOIN a centros_negocios
+  const outputRows = [[
+    'bussinessCenterId', 'cn_nombre', 'cn_agrupado', 'cn_agrupado2',
+    'area', 'area_nombre',
+    'year', 'month', 'year_month',
+    'ingresos', 'gastos', 'resultado', 'margen_pct'
+  ]];
+
+  for (const [key, v] of Object.entries(acum)) {
+    const [bizCenter, yearStr, monthStr] = key.split('|');
+    const year      = parseInt(yearStr);
+    const month     = parseInt(monthStr);
+    const ingresos  = Math.round(v.ingresos);
+    const gastos    = Math.round(v.gastos);
+    const resultado = ingresos - gastos;
+    const margen    = ingresos !== 0 ? Math.round((resultado / ingresos) * 10000) / 100 : 0;
+    const yearMonth = `${year}-${String(month).padStart(2, '0')}`;
+
+    const cn        = cnLookup[bizCenter] || {};
+    const cnNombre  = cn.descripcion  || bizCenter;
+    const cnAgr     = cn.cnAgrupado   || '';
+    const cnAgr2    = cn.cnAgrupado2  || '';
+    const area      = bizCenter.substring(0, 3);
+    const areaNombre = AREA_NOMBRES[area] || area;
+
+    outputRows.push([
+      bizCenter, cnNombre, cnAgr, cnAgr2,
+      area, areaNombre,
+      year, month, yearMonth,
+      ingresos, gastos, resultado, margen
+    ]);
+  }
+
+  // Ordenar: área → CN → año → mes
+  const sorted = [outputRows[0], ...outputRows.slice(1)
+    .sort((a, b) => a[4].localeCompare(b[4]) || a[1].localeCompare(b[1]) || a[6] - b[6] || a[7] - b[7])];
+
+  // Escribir hoja pnl_cn_data
+  let cnSheet = ss.getSheetByName('pnl_cn_data');
+  if (!cnSheet) cnSheet = ss.insertSheet('pnl_cn_data');
+  else cnSheet.clearContents();
+
+  cnSheet.getRange(1, 1, sorted.length, sorted[0].length).setValues(sorted);
+
+  // Formato encabezado
+  cnSheet.getRange(1, 1, 1, sorted[0].length)
+    .setFontWeight('bold').setBackground('#1e3a5f').setFontColor('white');
+  cnSheet.setFrozenRows(1);
+  cnSheet.setFrozenColumns(2);
+
+  // Colores por área (misma paleta que pnl_data)
+  const AREA_COLORS = {
+    RCT: { bg: '#dbeafe', font: '#1e3a8a' },
+    SST: { bg: '#dcfce7', font: '#14532d' },
+    INT: { bg: '#fef9c3', font: '#713f12' },
+    GNN: { bg: '#f3f4f6', font: '#374151' },
+  };
+  const nCols = sorted[0].length;
+  let currentArea = null, blockStart = 2;
+  const flush = (end, area) => {
+    if (!area || end < blockStart) return;
+    const c = AREA_COLORS[area];
+    if (c) cnSheet.getRange(blockStart, 1, end - blockStart + 1, nCols)
+                  .setBackground(c.bg).setFontColor(c.font);
+  };
+  for (let i = 1; i < sorted.length; i++) {
+    const area = sorted[i][4];
+    const row  = i + 1;
+    if (area !== currentArea) { flush(row - 1, currentArea); currentArea = area; blockStart = row; }
+  }
+  flush(sorted.length, currentArea);
+
+  // Formato numérico
+  const nRows = sorted.length;
+  cnSheet.getRange(2, 10, nRows - 1, 3).setNumberFormat('#,##0');
+  cnSheet.getRange(2, 13, nRows - 1, 1).setNumberFormat('0.00"%"');
+
+  // Resultado negativo en rojo
+  const resRange = cnSheet.getRange(2, 12, nRows - 1, 1);
+  const rule = SpreadsheetApp.newConditionalFormatRule()
+    .whenNumberLessThan(0).setFontColor('#dc2626').setRanges([resRange]).build();
+  cnSheet.setConditionalFormatRules([rule]);
+
+  Logger.log(`pnl_cn_data: ${sorted.length - 1} filas generadas`);
+}
+
+// ── PASO 3: GENERAR pnl_resumen ──────────────────────────────
 function generarResumen() {
   const ss       = SpreadsheetApp.getActiveSpreadsheet();
   const pnlSheet = ss.getSheetByName('pnl_data');
