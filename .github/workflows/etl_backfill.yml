@@ -1,0 +1,46 @@
+name: ETL Defontana - Backfill año histórico
+
+# Solo se ejecuta manualmente. Nunca tiene cron.
+# Cómo usar:
+#   GitHub → Actions → "ETL Defontana - Backfill año histórico" → Run workflow
+#   Ingresa el año que quieres re-extraer (ej: 2023) y ejecuta.
+#
+# El script descarga el detalle completo de ese año desde la API de Defontana
+# y reemplaza la pestaña hist_details_YYYY en Google Sheets.
+# No toca el workflow diario ni el histórico semanal.
+
+on:
+  workflow_dispatch:
+    inputs:
+      year:
+        description: "Año a re-extraer (ej: 2023)"
+        required: true
+        default: "2023"
+
+jobs:
+  backfill:
+    name: "Re-extraer hist_details_${{ github.event.inputs.year }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    env:
+      DEFONTANA_TOKEN:             ${{ secrets.DEFONTANA_TOKEN }}
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      GOOGLE_SPREADSHEET_ID:       ${{ secrets.GOOGLE_SPREADSHEET_ID }}
+      BACKFILL_YEAR:               ${{ github.event.inputs.year }}
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: "Backfill hist_details_${{ github.event.inputs.year }}"
+        run: python vouchers_detail_backfill.py
