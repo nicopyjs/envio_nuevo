@@ -10,7 +10,7 @@ jobs:
   etl:
     name: Extraer y subir a SharePoint
     runs-on: ubuntu-latest
-    timeout-minutes: 120      # El script 3/3 puede tardar hasta ~17 min; 2 horas es margen seguro
+    timeout-minutes: 300      # El script 3/3 puede tardar hasta ~17 min; 5 horas es margen seguro
 
     env:
       DEFONTANA_TOKEN:             ${{ secrets.DEFONTANA_TOKEN }}

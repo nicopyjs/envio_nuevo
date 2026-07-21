@@ -19,7 +19,7 @@ Defontana API → GitHub Actions (Python) → Google Sheets → Apps Script (P&L
 **Repositorio:** `nicopyjs/envio_nuevo` (privado)
 **Archivo:** `.github/workflows/etl_diario.yml`
 **Ejecución:** Lunes a viernes a las 10:00 UTC (06:00 hora Chile invierno CLT / 07:00 en verano CLST)
-**Timeout:** 120 minutos
+**Timeout:** 300 minutos
 **Trigger manual disponible:** sí (workflow_dispatch)
 
 Ejecuta tres scripts en secuencia:
