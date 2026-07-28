@@ -18,7 +18,7 @@ Defontana API → GitHub Actions (Python) → Google Sheets → Apps Script (P&L
 ### 2.1 GitHub Actions — ETL Diario
 **Repositorio:** `nicopyjs/envio_nuevo` (privado)
 **Archivo:** `.github/workflows/etl_diario.yml`
-**Ejecución:** Lunes a viernes a las 10:00 UTC (06:00 hora Chile invierno CLT / 07:00 en verano CLST)
+**Ejecución:** Lunes a viernes a las 07:07 UTC (03:07 hora Chile invierno CLT / 04:07 en verano CLST)
 **Timeout:** 300 minutos
 **Trigger manual disponible:** sí (workflow_dispatch)
 
