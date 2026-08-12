@@ -51,15 +51,23 @@ def upload_dataframe(df, subfolder: str, filename: str, logger=None) -> None:
     client      = _get_client()
     spreadsheet = client.open_by_key(spreadsheet_id)
 
+    needed_rows = max(len(df) + 10, 100)
+    needed_cols = len(df.columns) + 2
+
     # Obtener o crear la pestaña
     try:
         worksheet = spreadsheet.worksheet(sheet_name)
         worksheet.clear()
+        if worksheet.row_count < needed_rows or worksheet.col_count < needed_cols:
+            worksheet.resize(
+                rows=max(worksheet.row_count, needed_rows),
+                cols=max(worksheet.col_count, needed_cols),
+            )
         if logger:
             logger.info(f"Pestaña '{sheet_name}' limpiada.")
     except gspread.exceptions.WorksheetNotFound:
         worksheet = spreadsheet.add_worksheet(
-            title=sheet_name, rows=max(len(df) + 10, 100), cols=len(df.columns) + 2
+            title=sheet_name, rows=needed_rows, cols=needed_cols
         )
         if logger:
             logger.info(f"Pestaña '{sheet_name}' creada.")
