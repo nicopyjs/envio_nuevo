@@ -19,8 +19,8 @@
 //     para agregar nombre, CN agrupado y área de cada centro.
 // ============================================================
 
-const AREAS_VALIDAS = ['RCT', 'SST', 'INT', 'GNN'];
-const AREA_NOMBRES  = { RCT: 'Refacciones', SST: 'Serv. Técnico', INT: 'Instalaciones', GNN: 'General' };
+const AREAS_VALIDAS = ['RCT', 'SST', 'INT', 'GNN', 'ING', 'RBP'];
+const AREA_NOMBRES  = { RCT: 'Refacciones', SST: 'Serv. Técnico', INT: 'Instalaciones', GNN: 'General', ING: 'Ingeniería', RBP: 'Redes de baja presión' };
 
 // ID del spreadsheet maestro de centros de negocio
 const CN_SPREADSHEET_ID = '1XCeMZRw6bU--3SeOFRI08J5eFxaFbvVflPWWaczufQc';
@@ -302,6 +302,8 @@ function generarPNL() {
     SST: { bg: '#dcfce7', font: '#14532d' },  // verde — Serv. Técnico
     INT: { bg: '#fef9c3', font: '#713f12' },  // amarillo — Instalaciones
     GNN: { bg: '#f3f4f6', font: '#374151' },  // gris — General
+    ING: { bg: '#ede9fe', font: '#4c1d95' },  // violeta — Ingeniería
+    RBP: { bg: '#fce7f3', font: '#831843' },  // rosado — Redes de baja presión
   };
 
   // Agrupar filas consecutivas por área para hacer setBackground en bloque
