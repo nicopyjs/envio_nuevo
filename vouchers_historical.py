@@ -17,7 +17,7 @@ import requests
 import pandas as pd
 from datetime import datetime
 from logger_etl import setup_logger
-from sharepoint_uploader import upload_dataframe
+from google_spreadsheet_uploader import upload_dataframe
 
 ETL_NAME = "vouchers_historical"
 logger = setup_logger(ETL_NAME)

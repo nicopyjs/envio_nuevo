@@ -1,6 +1,5 @@
 """
-google_sheets_uploader.py  (renombrado internamente, el archivo se llama sharepoint_uploader.py
-para no cambiar los imports en los otros scripts)
+google_spreadsheet_uploader.py
 
 Módulo compartido para autenticar con una cuenta de servicio de Google y
 escribir DataFrames directamente en pestañas de un Google Spreadsheet.
@@ -14,6 +13,7 @@ Variables de entorno requeridas:
 import os
 import json
 import math
+import time
 import gspread
 from google.oauth2.service_account import Credentials
 
@@ -21,6 +21,28 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
+
+RETRY_ATTEMPTS = 5
+RETRY_BASE_DELAY = 2  # segundos, se duplica en cada intento (backoff exponencial)
+
+
+def _with_retries(func, logger=None, description="operación de Google Sheets"):
+    """Reintenta func() ante errores transitorios de la API (5xx)."""
+    for attempt in range(1, RETRY_ATTEMPTS + 1):
+        try:
+            return func()
+        except gspread.exceptions.APIError as e:
+            status = e.response.status_code if e.response is not None else None
+            transient = status is not None and 500 <= status < 600
+            if not transient or attempt == RETRY_ATTEMPTS:
+                raise
+            delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
+            msg = (f"[WARN] {description} falló (HTTP {status}), "
+                   f"reintento {attempt}/{RETRY_ATTEMPTS} en {delay}s...")
+            print(msg)
+            if logger:
+                logger.warning(msg)
+            time.sleep(delay)
 
 
 def _get_client() -> gspread.Client:
@@ -49,7 +71,11 @@ def upload_dataframe(df, subfolder: str, filename: str, logger=None) -> None:
     sheet_name = filename.replace(".csv", "")   # nombre de la pestaña
 
     client      = _get_client()
-    spreadsheet = client.open_by_key(spreadsheet_id)
+    spreadsheet = _with_retries(
+        lambda: client.open_by_key(spreadsheet_id),
+        logger=logger,
+        description=f"abrir spreadsheet '{spreadsheet_id}'",
+    )
 
     needed_rows = max(len(df) + 10, 100)
     needed_cols = len(df.columns) + 2
@@ -84,10 +110,14 @@ def upload_dataframe(df, subfolder: str, filename: str, logger=None) -> None:
     for i in range(total_batches):
         chunk = values[i * BATCH : (i + 1) * BATCH]
         start_row = i * BATCH + 1
-        worksheet.update(
-            range_name=f"A{start_row}",
-            values=chunk,
-            value_input_option="RAW",
+        _with_retries(
+            lambda: worksheet.update(
+                range_name=f"A{start_row}",
+                values=chunk,
+                value_input_option="RAW",
+            ),
+            logger=logger,
+            description=f"escribir lote {i + 1}/{total_batches} en '{sheet_name}'",
         )
 
     msg = f"[OK] Google Sheets '{sheet_name}': {len(df)} filas escritas."

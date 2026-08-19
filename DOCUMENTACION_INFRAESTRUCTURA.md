@@ -63,8 +63,8 @@ Estructura de pestañas:
 
 Todos los scripts están en el repositorio `envio_nuevo/`. Requieren Python 3.11.
 
-### `sharepoint_uploader.py`
-Módulo de utilidad para subir DataFrames a Google Sheets. A pesar del nombre (herencia del sistema anterior), conecta con Google Sheets vía `gspread`. Lee las credenciales y el ID del spreadsheet desde variables de entorno. Sube en lotes de 50.000 filas para evitar timeouts.
+### `google_spreadsheet_uploader.py`
+Módulo de utilidad para subir DataFrames a Google Sheets vía `gspread`. Lee las credenciales y el ID del spreadsheet desde variables de entorno. Sube en lotes de 50.000 filas para evitar timeouts, con reintentos automáticos (backoff exponencial) ante errores 5xx transitorios de la API de Google.
 
 **Variables de entorno requeridas:**
 - `GOOGLE_SERVICE_ACCOUNT_JSON` — contenido JSON de la service account
