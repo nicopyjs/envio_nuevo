@@ -2,10 +2,10 @@ name: ETL Defontana - Diario
 
 on:
   schedule:
-    # 07:07 UTC = 03:07 AM hora Chile invierno (CLT, UTC-4) | 04:07 AM en verano (CLST, UTC-3)
-    # Minuto 07 (no en punto) para evitar la congestion de cron jobs de GitHub Actions en :00,
-    # que puede retrasar la ejecucion real varios minutos u horas.
-    - cron: "7 7 * * 1-5"  # Lunes a viernes. Cambia a "7 7 * * *" si quieres incluir fines de semana.
+        # 01:07 UTC = 22:07 Chile en verano (CLST, UTC-3) | 21:07 en invierno (CLT, UTC-4).
+        # Corre pasada la medianoche UTC: ToDate es la fecha UTC de hoy y no se incluye,
+        # asi cada corrida deja completo el dia anterior. Martes a sabado cubre lunes a viernes.
+        - cron: "7 1 * * 2-6"
   workflow_dispatch:          # Permite ejecutar manualmente desde GitHub
 
 jobs:
